@@ -31,7 +31,7 @@ Sent once per scrape that finds new activity. Per route, it includes:
 - **Next.js (App Router)** deployed on **Vercel**
 - **Neon Postgres** + **Drizzle ORM** for storage
 - **Vercel Cron** runs the scraper once a day (13:00 UTC by default ≈ 6 AM Pacific)
-- **Resend** for the activity email
+- **Gmail SMTP** (via Nodemailer) for the activity email
 - **Recharts** for trend graphs
 
 ## Data sources
@@ -81,14 +81,15 @@ direct SQL migration instead:
 npx tsx --env-file=.env.local scripts/migrate-add-columns.ts
 ```
 
-### 3. Resend (email notifications)
+### 3. Gmail (email notifications)
 
-- Create a Resend account.
-- Put the API key in `RESEND_API_KEY`.
-- Set `NOTIFY_EMAIL` to your inbox.
-- Set `NOTIFY_FROM` either to a verified-domain sender, or to
-  `onboarding@resend.dev` (only delivers to the email you signed up with —
-  fine for personal use).
+The digest is sent through a Gmail account over SMTP (free, ~500 emails/day).
+
+- Turn on **2-Step Verification** for the sending Google account.
+- Create an **app password** at https://myaccount.google.com/apppasswords.
+- Put the account address in `GMAIL_USER` and the 16-character app password
+  (no spaces) in `GMAIL_APP_PASSWORD`.
+- Set `NOTIFY_EMAIL` to one or more recipients, comma-separated.
 
 ### 4. Local dev
 
@@ -153,7 +154,7 @@ page get inline samples in the email; the rest are summarized as "50 new ticks")
   unified `ScrapedRoute`.
 - `lib/grade.ts` — YDS-grade-to-numeric conversion (for plotting + sorting).
 - `lib/scrape-runner.ts` — per-route scrape → snapshot → diff → email digest.
-- `lib/notify.ts` — Resend email rendering.
+- `lib/notify.ts` — email rendering + sending via Gmail SMTP.
 - `app/api/cron/scrape/route.ts` — the cron handler.
 - `app/page.tsx` + `components/routes-table.tsx` — main UI: sortable table,
   expandable rows, charts.

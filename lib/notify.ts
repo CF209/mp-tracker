@@ -1,4 +1,4 @@
-import { Resend } from "resend";
+import nodemailer from "nodemailer";
 
 export type RouteChange = {
   routeName: string;
@@ -17,15 +17,19 @@ export type RouteChange = {
 
 export async function sendDigest(changes: RouteChange[]): Promise<void> {
   if (changes.length === 0) return;
-  const key = process.env.RESEND_API_KEY;
-  const to = process.env.NOTIFY_EMAIL;
-  const from = process.env.NOTIFY_FROM;
-  if (!key || !to || !from) {
-    console.warn("Resend env vars missing; skipping email.");
+  const user = process.env.GMAIL_USER;
+  const pass = process.env.GMAIL_APP_PASSWORD;
+  // Comma-separated list of recipients.
+  const to = (process.env.NOTIFY_EMAIL ?? "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+  if (!user || !pass || to.length === 0) {
+    console.warn("Gmail env vars missing; skipping email.");
     return;
   }
 
-  const resend = new Resend(key);
+  const transport = nodemailer.createTransport({ service: "gmail", auth: { user, pass } });
   const subject = `MP Tracker: activity on ${changes.length} route${changes.length === 1 ? "" : "s"}`;
 
   const html = changes
@@ -55,8 +59,8 @@ export async function sendDigest(changes: RouteChange[]): Promise<void> {
     })
     .join("\n");
 
-  await resend.emails.send({
-    from,
+  await transport.sendMail({
+    from: `MP Tracker <${user}>`,
     to,
     subject,
     html: `<div style="font-family:system-ui;max-width:680px;line-height:1.45">${html}</div>`,
