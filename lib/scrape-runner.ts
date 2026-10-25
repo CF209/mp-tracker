@@ -37,10 +37,16 @@ export async function runScrape(): Promise<RunResult> {
       const newStars = Math.max(0, scraped.starVotes - r.starVotes);
       const newTodos = Math.max(0, scraped.todoCount - r.todoCount);
 
+      // Comments come from a most-recent-first page, so the newest are always included.
+      // Ticks, stars, and grade suggestions are fetched in full; only items created since
+      // the last scrape can be new. This keeps old items from being reported when they
+      // first show up in the fetched set (e.g. right after deploying a scraper change, or
+      // after a route is re-added).
+      const since = r.lastScrapedAt;
       const freshComments = await pickNew(r.id, scraped.commentSamples, seenComments);
-      const freshTicks = await pickNew(r.id, scraped.tickSamples, seenTicks);
-      const freshStars = await pickNew(r.id, scraped.starSamples, seenStars);
-      const freshRatings = await pickNew(r.id, scraped.ratingSamples, seenRatings);
+      const freshTicks = await pickNew(r.id, createdSince(scraped.tickSamples, since), seenTicks);
+      const freshStars = await pickNew(r.id, createdSince(scraped.starSamples, since), seenStars);
+      const freshRatings = await pickNew(r.id, createdSince(scraped.ratingSamples, since), seenRatings);
 
       await db
         .update(routes)
@@ -87,6 +93,14 @@ export async function runScrape(): Promise<RunResult> {
     await sendDigest(changes);
   }
   return { scanned: all.length, errors, notified: changes.length };
+}
+
+// Keep samples created after `since`, minus a day of slack for clock skew and slow APIs.
+// The seen_* tables still dedupe anything that falls inside the slack window twice.
+function createdSince(samples: Sample[], since: Date | null): Sample[] {
+  if (!since) return [];
+  const cutoff = since.getTime() - 24 * 60 * 60 * 1000;
+  return samples.filter((s) => s.createdAt && new Date(s.createdAt).getTime() >= cutoff);
 }
 
 // Insert samples whose fingerprints we haven't seen for this route; return only the new ones.

@@ -4,7 +4,8 @@ import { gradeToNumeric, mode } from "./grade";
 const UA = "Mozilla/5.0 (compatible; MP-Tracker/1.0; personal route tracker)";
 const BASE = "https://www.mountainproject.com";
 
-export type Sample = { fingerprint: string; author: string; snippet: string };
+// createdAt is set when the source API provides it, so callers can ignore old items.
+export type Sample = { fingerprint: string; author: string; snippet: string; createdAt?: string };
 
 export type ScrapedRoute = {
   routeId: string;
@@ -138,10 +139,12 @@ type TickItem = {
   text?: string;
   comment?: string | null;
   user?: { id: number; name: string } | false | null;
+  createdAt?: string;
 };
 
 type StarItem = {
   id: number;
+  // MP stores stars offset by one: 1 = bomb (0 stars) ... 5 = 4 stars.
   score: number;
   user?: { id: number; name: string } | false | null;
   createdAt?: string;
@@ -206,12 +209,20 @@ function tickSnippet(t: TickItem): string {
   return parts.join(" — ").slice(0, 280);
 }
 
+function starSnippet(score: number): string {
+  const stars = score - 1;
+  if (stars <= 0) return "Bomb (0 stars)";
+  return `${stars} star${stars === 1 ? "" : "s"}`;
+}
+
 export async function scrapeRoute(routeId: string, canonicalUrl: string): Promise<ScrapedRoute> {
   // Fetch everything in parallel where possible.
-  const [html, ticksPage1, starsPage1, ratingsAll, todosPage1, commentsHtml] = await Promise.all([
+  const [html, ticksPage1, starsAll, ratingsAll, todosPage1, commentsHtml] = await Promise.all([
     fetchHtml(canonicalUrl),
     fetchJson<TickItem>(`${BASE}/api/v2/routes/${routeId}/ticks?per_page=20&page=1`),
-    fetchJson<StarItem>(`${BASE}/api/v2/routes/${routeId}/stars?per_page=20&page=1`),
+    // The stars endpoint sorts by score, not date, and paging through tied scores is
+    // unstable, so fetch every vote rather than trusting page 1 to hold the newest ones.
+    fetchAllPages<StarItem>((p) => `${BASE}/api/v2/routes/${routeId}/stars?per_page=250&page=${p}`),
     fetchAllPages<RatingItem>(
       (p) => `${BASE}/api/v2/routes/${routeId}/ratings?per_page=250&page=${p}`,
     ),
@@ -235,7 +246,7 @@ export async function scrapeRoute(routeId: string, canonicalUrl: string): Promis
   const ldBlocks = jsonLdBlocks(html);
   const location = findBreadcrumb(ldBlocks);
   const { rating: starRating, votes: ldVotes } = findAggregateRating(ldBlocks);
-  const starVotes = starsPage1.total || ldVotes;
+  const starVotes = starsAll.length || ldVotes;
   const grade = parseOfficialGrade($);
 
   // Page Views
@@ -267,23 +278,29 @@ export async function scrapeRoute(routeId: string, canonicalUrl: string): Promis
   // Date histogram of every tick ever.
   const tickHistory = tickHistogram(allTicks);
 
-  // Samples for "new since last scrape" emails. All use stable MP IDs.
-  const tickSamples: Sample[] = ticksPage1.data.map((t) => ({
+  // Samples for "new since last scrape" emails. All use stable MP IDs. Ticks are sorted by
+  // climb date and grade suggestions by grade, so a back-logged tick or an easy grade
+  // suggestion can sit far down the list: sample every item and let the runner filter by
+  // createdAt.
+  const tickSamples: Sample[] = allTicks.map((t) => ({
     fingerprint: `mp-tick-${t.id}`,
     author: t.user && typeof t.user === "object" ? t.user.name : "Anonymous",
     snippet: tickSnippet(t),
+    createdAt: t.createdAt,
   }));
 
-  const starSamples: Sample[] = starsPage1.data.map((s) => ({
+  const starSamples: Sample[] = starsAll.map((s) => ({
     fingerprint: `mp-star-${s.id}`,
     author: s.user && typeof s.user === "object" ? s.user.name : "Anonymous",
-    snippet: `${s.score} star${s.score === 1 ? "" : "s"}`,
+    snippet: starSnippet(s.score),
+    createdAt: s.createdAt,
   }));
 
-  const ratingSamples: Sample[] = ratingsAll.slice(0, 20).map((r) => ({
+  const ratingSamples: Sample[] = ratingsAll.map((r) => ({
     fingerprint: `mp-rating-${r.id}`,
     author: r.user && typeof r.user === "object" ? r.user.name : "Anonymous",
     snippet: (r.allRatings ?? []).join(", "),
+    createdAt: r.createdAt,
   }));
 
   // Comments — HTML, but every <table id="Comment-N"> is stable.

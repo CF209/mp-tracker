@@ -1,5 +1,7 @@
 import nodemailer from "nodemailer";
 
+const TRACKER_URL = "https://mp-tracker.vercel.app/";
+
 export type RouteChange = {
   routeName: string;
   routeUrl: string;
@@ -63,7 +65,10 @@ export async function sendDigest(changes: RouteChange[]): Promise<void> {
     from: `MP Tracker <${user}>`,
     to,
     subject,
-    html: `<div style="font-family:system-ui;max-width:680px;line-height:1.45">${html}</div>`,
+    html: `<div style="font-family:system-ui;max-width:680px;line-height:1.45">
+      <p style="margin:0 0 8px"><a href="${TRACKER_URL}">Open MP Tracker</a> to see all routes and trends.</p>
+      ${html}
+    </div>`,
   });
 }
 
